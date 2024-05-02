@@ -1289,17 +1289,37 @@ _libssh2_mbedtls_ecdsa_new_private(libssh2_ecdsa_ctx **ctx,
                                    const unsigned char *pwd)
 {
     mbedtls_pk_context pkey;
+#if MBEDTLS_VERSION_NUMBER >= 0x03060000
+    int ret;
+    mbedtls_ecdsa_context *pk_ecdsa;
+    
+    *ctx = (libssh2_ecdsa_ctx *) LIBSSH2_ALLOC(session, sizeof(libssh2_ecdsa_ctx));
+    if(!*ctx)
+        return -1;
+    
+    mbedtls_ecdsa_init(*ctx);
+    mbedtls_pk_init(&pkey);
+
+    ret = mbedtls_pk_parse_keyfile(&pkey, filename, (char *)pwd,
+                                mbedtls_ctr_drbg_random,
+                               &_libssh2_mbedtls_ctr_drbg);
+
+    if(ret || mbedtls_pk_get_type(&pkey) != MBEDTLS_PK_ECKEY) {
+        mbedtls_pk_free(&pkey);
+        mbedtls_ecdsa_free(*ctx);
+        LIBSSH2_FREE(session, *ctx);
+        *ctx = NULL;
+        return -1;
+    }
+    
+    pk_ecdsa = mbedtls_pk_ec(pkey);
+    mbedtls_ecp_copy(*ctx, pk_ecdsa);
+    mbedtls_pk_free(&pkey);
+    return 0;
+#else
     unsigned char *data;
     size_t data_len;
 
-#if MBEDTLS_VERSION_NUMBER >= 0x03060000
-    /* FIXME: implement this functionality via a public API */
-    (void)session;
-    (void)filename;
-    (void)pwd;
-    data = NULL;
-    data_len = 0;
-#else
     if(mbedtls_pk_load_file(filename, &data, &data_len))
         goto cleanup;
 
@@ -1312,13 +1332,13 @@ _libssh2_mbedtls_ecdsa_new_private(libssh2_ecdsa_ctx **ctx,
     _libssh2_mbedtls_parse_openssh_key(ctx, session, data, data_len, pwd);
 
 cleanup:
-#endif
 
     mbedtls_pk_free(&pkey);
 
     _libssh2_mbedtls_safe_free(data, data_len);
 
     return *ctx ? 0 : -1;
+#endif
 }
 
 /* _libssh2_ecdsa_new_private
